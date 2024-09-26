@@ -25,7 +25,7 @@ pub struct Cli {
 
     /// Fan speed update period (s)
     #[arg(short, long, default_value = "2")]
-    pub fan_speed_update_rate: u64,
+    pub fan_speed_update_period: u64,
 
     /// Temperature hysteresis (°C)
     #[arg(short, long, default_value = "5")]

@@ -83,7 +83,7 @@ fn main() {
                 last_fan_speed = i64::from(fan_speed);
             }
     
-            thread::sleep(Duration::from_secs(cli.fan_speed_update_rate));
+            thread::sleep(Duration::from_secs(cli.fan_speed_update_period));
         }
     }
 }
