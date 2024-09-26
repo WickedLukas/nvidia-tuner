@@ -1,0 +1,15 @@
+[package]
+name = "nvidia-tuner"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A simple command line tool to overlock and control the fan of NVIDIA GPUs using the NVML library on Linux. This supports both X11 and Wayland."
+repository = "https://github.com/WickedLukas/nvidia_fan"
+
+[dependencies]
+sudo2 = "0.2.1"
+clap = { version = "4.5.18", features = ["derive"] }
+nvml-wrapper = "0.10.0"
+nvml-wrapper-sys = "0.8.0"
+ctrlc = "3.4.5"
+signal-hook = "0.3.17"
