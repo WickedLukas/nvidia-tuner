@@ -16,7 +16,7 @@ use utils::{parse_temperature_fan_speed_pairs, check_temperature_fan_speed_pairs
 fn main() {
     let cli = Cli::parse();
 
-    sudo2::escalate_if_needed().map_err(|e| format!("Failed to escalate privileges {}", e)).unwrap();
+    escalate_priviliges().map_err(|e| format!("Failed to escalate privileges: {}", e)).unwrap();
 
     // INITIALIZE NVML
 
@@ -88,6 +88,25 @@ fn main() {
     }
 }
 
+fn escalate_priviliges(
+) -> Result<(), Box<dyn std::error::Error>> {
+    if sudo2::running_as_root() {
+        return Ok(());
+    }
+
+    if which::which("sudo").is_ok() {
+        sudo2::escalate_if_needed()?;
+    } else if which::which("doas").is_ok() {
+        sudo2::doas()?;
+    } else if which::which("pkexec").is_ok() {
+        sudo2::pkexec()?;
+    } else {
+        return Err("Root privileges are required to run this command.".into());
+    }
+
+    Ok(())
+}
+
 fn check_driver_version(
     nvml: &Nvml
 ) -> Result<(), String> {
@@ -97,13 +116,13 @@ fn check_driver_version(
     if let Some(first_string) = driver_version.split('.').next() {
         major = first_string.parse::<i32>().map_err(|e| format!("Failed to parse major version from '{}': {}", first_string, e))?;
     } else {
-        return Err(format!("Failed to split driver version '{}'", driver_version));
+        return Err(format!("Failed to split driver version '{}'.", driver_version));
     }
 
     let major_min: i32 = 520;
     if major < major_min
     {
-        return Err(format!("Your driver version v{} is not supported. Driver version v{} or newer is required", major, major_min))
+        return Err(format!("Your driver version v{} is not supported. Driver version v{} or newer is required.", major, major_min))
     }
     Ok(())
 }

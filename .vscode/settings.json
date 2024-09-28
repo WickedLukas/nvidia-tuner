@@ -1,6 +1,9 @@
 {
     "cSpell.words": [
         "consts",
-        "nvml"
+        "doas",
+        "nvml",
+        "pkexec",
+        "priviliges"
     ]
 }
