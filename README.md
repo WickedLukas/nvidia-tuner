@@ -31,7 +31,7 @@ The fan speed between the given temperature and fan speed pairs is linearly inte
 
 ## Run on startup
 
-1. Download the binary file.
+1. Download the binary file from [the latest release](https://github.com/WickedLukas/nvidia-tuner/releases).
 2. Copy it to `/usr/local/sbin/`.
 3. Create the systemd service file `/etc/systemd/system/nvidia-tuner.service` with the following content:
 
