@@ -52,6 +52,9 @@ StandardError=journal
 WantedBy=graphical.target
 ```
 
+Note that this configuration should only be used when setting a custom fan curve, since the tool has to continuously run, in order to control the fan.
+When the fan curve functionality is not used, the type should be oneshot and the restart parameters need to be removed, so the tool is executed only ones.
+
 4. Reload the systemd manager configuration to recognize the new service:
 
 ```bash
