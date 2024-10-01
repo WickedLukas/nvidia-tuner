@@ -1,6 +1,6 @@
 # NVIDIA-TUNER
 
-A simple Rust CLI tool to overlock and control the fan of NVIDIA GPUs using the NVML library on Linux. This supports both X11 and Wayland.
+A simple Rust CLI tool for overlocking, undervolting and controlling the fan of NVIDIA GPUs on Linux. Using the NVML library it equally supports X11 and Wayland.
 
 ## Features
 
@@ -9,7 +9,7 @@ A simple Rust CLI tool to overlock and control the fan of NVIDIA GPUs using the 
 * Set power limit.
 * Fan control using a custom linear fan curve.
 * Use temperature hysteresis to prevent the fan from spinning up and down too frequently.
-* Reset the fan setting to default on termination.
+* Automatically set the fan control back to default on termination.
 
 ## Usage
 
@@ -27,7 +27,7 @@ Usage example:
 ```
 
 This command takes temperature and fan speed pairs as an argument. In this example the fan speed will be 30% up to 50°C and 100% above 100°C.
-The fan speed between the given temperature and fan speed pairs is linearly interpolated to enable smooth transitions.  
+The fan speed between the given temperature and fan speed pairs is linearly interpolated to enable smooth transitions.
 
 ## Run on startup
 
@@ -37,23 +37,18 @@ The fan speed between the given temperature and fan speed pairs is linearly inte
 
 ```service
 [Unit]
-Description=GPU overclock and fan control
+Description=nvidia-tuner
 After=graphical.target
 
 [Service]
-Type=simple
+Type=oneshot
 ExecStart=/usr/local/sbin/nvidia-tuner ---core-clock-offset 150 --memory-clock-offset 800 --power-limit 180 --pairs 50:30,70:40,90:60,100:100
-Restart=always
-RestartSec=5s
 StandardOutput=journal
 StandardError=journal
 
 [Install]
 WantedBy=graphical.target
 ```
-
-Note that this configuration should only be used when setting a custom fan curve, since the tool has to continuously run, in order to control the fan.
-When the fan curve functionality is not used, the type should be oneshot and the restart parameters need to be removed, so the tool is executed only ones.
 
 4. Reload the systemd manager configuration to recognize the new service:
 

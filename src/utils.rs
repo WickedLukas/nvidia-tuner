@@ -1,4 +1,4 @@
-use crate::constants::{MAX_TEMPERATURE, MAX_FAN_SPEED};
+use crate::constants::{MAX_TEMPERATURE, MAX_FAN_SPEED, MAX_FAN_SPEED_UPDATE_PERIOD};
 
 #[derive(Debug)]
 pub struct TempFanPair {
@@ -6,10 +6,20 @@ pub struct TempFanPair {
     pub fan_speed: u32
 }
 
+pub fn validate_fan_speed_update_period(
+    value: &str
+)-> Result<u64, String> {
+    let period: u64 = value.parse::<u64>().map_err(|e| format!("Failed to parse fan speed update period from '{}': {}", value, e))?;
+    if period > MAX_FAN_SPEED_UPDATE_PERIOD {
+        Err(format!("Fan speed update period exceeds limit of {}: {}", MAX_FAN_SPEED_UPDATE_PERIOD, period))
+    } else {
+        Ok(period)
+    }
+}
+
 fn parse_temperature_fan_speed_parts(
     parts: &[&str]
 ) -> Result<TempFanPair, String> {
-
     if parts.len() != 2 {
         return Err(format!("Invalid temperature and fan speed pair format"));
     }
@@ -20,10 +30,10 @@ fn parse_temperature_fan_speed_parts(
         format!("Failed to parse fan speed from '{}': {}", parts[1], e))?;
 
     if temperature > MAX_TEMPERATURE {
-        return Err(format!("Temperature exceeds limit of {}°C: {}°C", MAX_TEMPERATURE, temperature))
+        return Err(format!("Temperature within pairs exceeds limit of {}°C: {}°C", MAX_TEMPERATURE, temperature))
     }
     if fan_speed > MAX_FAN_SPEED {
-        return Err(format!("Fan speed exceeds limit of {}%: {}%", MAX_FAN_SPEED, fan_speed))
+        return Err(format!("Fan speed within pairs exceeds limit of {}%: {}%", MAX_FAN_SPEED, fan_speed))
     }
     Ok(TempFanPair { temperature, fan_speed })
 }

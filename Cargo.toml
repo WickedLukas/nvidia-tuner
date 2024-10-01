@@ -1,9 +1,9 @@
 [package]
 name = "nvidia-tuner"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
-description = "A simple command line tool to overlock and control the fan of NVIDIA GPUs using the NVML library on Linux. This supports both X11 and Wayland."
+description = "A simple Rust CLI tool for overlocking, undervolting and controlling the fan of NVIDIA GPUs on Linux. Using the NVML library it equally supports X11 and Wayland."
 repository = "https://github.com/WickedLukas/nvidia-tuner.git"
 
 [dependencies]
@@ -14,3 +14,6 @@ nvml-wrapper = "0.10.0"
 nvml-wrapper-sys = "0.8.0"
 ctrlc = "3.4.5"
 signal-hook = "0.3.17"
+
+[profile.release]
+lto = true

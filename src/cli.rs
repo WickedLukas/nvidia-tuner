@@ -1,5 +1,7 @@
 use clap::Parser;
 
+use crate::utils::validate_fan_speed_update_period;
+
 #[derive(Parser)]
 #[command(version, about)]
 pub struct Cli {
@@ -24,7 +26,7 @@ pub struct Cli {
     pub pairs: Option<String>,
 
     /// Fan speed update period (s)
-    #[arg(short, long, default_value = "2")]
+    #[arg(short, long, default_value = "2", value_parser = validate_fan_speed_update_period)]
     pub fan_speed_update_period: u64,
 
     /// Temperature hysteresis (°C)

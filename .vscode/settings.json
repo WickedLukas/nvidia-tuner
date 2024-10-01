@@ -3,7 +3,9 @@
         "consts",
         "doas",
         "nvml",
+        "overlocking",
         "pkexec",
-        "priviliges"
+        "priviliges",
+        "undervolting"
     ]
 }

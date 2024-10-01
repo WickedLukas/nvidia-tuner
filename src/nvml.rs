@@ -11,6 +11,7 @@ pub struct SafeNvmlDevice {
 }
 unsafe impl Send for SafeNvmlDevice {}
 
+// TODO: Shall be deprecated at some point.
 pub fn set_core_clock_offset(
     nvml_lib: &NvmlLib,
     device_handle: &Arc<Mutex<SafeNvmlDevice>>,
@@ -25,6 +26,7 @@ pub fn set_core_clock_offset(
     }
 }
 
+// TODO: Shall be deprecated at some point.
 pub fn set_memory_clock_offset(
     nvml_lib: &NvmlLib,
     device_handle: &Arc<Mutex<SafeNvmlDevice>>,
