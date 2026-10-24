@@ -378,7 +378,7 @@ pub fn setup_cleanup(
             let device_handle = Arc::clone(&device_handle);
             let tuner_state = Arc::clone(&tuner_state);
             move |info| {
-                eprintln!("Panic occurred: {:?}", info);
+                eprintln!("Panic occurred: {}", info);
                 if let Err(e) = restore_original_settings(&nvml_lib, &device_handle, &tuner_state) {
                     eprintln!("!!! Restoring the original settings failed on panic !!!\n\n{}", e);
                 } else {
