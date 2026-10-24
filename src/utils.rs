@@ -1,4 +1,4 @@
-use crate::constants::{MAX_TEMPERATURE, MAX_FAN_SPEED, MAX_FAN_SPEED_UPDATE_PERIOD};
+use crate::constants::{MAX_TEMPERATURE, MAX_FAN_SPEED, MIN_FAN_SPEED_UPDATE_PERIOD, MAX_FAN_SPEED_UPDATE_PERIOD};
 
 #[derive(Debug)]
 pub struct TempFanPair {
@@ -10,7 +10,9 @@ pub fn validate_fan_speed_update_period(
     value: &str
 )-> Result<u64, String> {
     let period: u64 = value.parse::<u64>().map_err(|e| format!("Failed to parse fan speed update period from '{}': {}", value, e))?;
-    if period > MAX_FAN_SPEED_UPDATE_PERIOD {
+    if period < MIN_FAN_SPEED_UPDATE_PERIOD {
+        Err(format!("Fan speed update period is below limit of {}", MIN_FAN_SPEED_UPDATE_PERIOD))
+    } else if period > MAX_FAN_SPEED_UPDATE_PERIOD {
         Err(format!("Fan speed update period exceeds limit of {}", MAX_FAN_SPEED_UPDATE_PERIOD))
     } else {
         Ok(period)
