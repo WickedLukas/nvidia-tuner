@@ -9,7 +9,8 @@ A simple Rust CLI tool for overlocking, undervolting and controlling the fan of 
 * Set power limit.
 * Fan control using a custom linear fan curve.
 * Use temperature hysteresis to prevent the fan from spinning up and down too frequently.
-* Automatically set the fan control back to default on termination.
+* Automatically restore all changed settings (clock offsets, power limit and fan control) on termination.
+* Keep fan control running if single temperature reads or fan speed updates fail.
 
 ## Usage
 
@@ -29,6 +30,8 @@ Usage example:
 This command takes temperature and fan speed pairs as an argument. In this example the fan speed will be 30% up to 50°C and 100% above 100°C.
 The fan speed between the given temperature and fan speed pairs is linearly interpolated to enable smooth transitions.
 
+The tool keeps running until it is terminated (e.g. with Ctrl+C or `systemctl stop`) and then restores all settings it changed to their original values.
+
 ## Run on startup
 
 1. Download the binary file from [the latest release](https://github.com/WickedLukas/nvidia-tuner/releases).
@@ -42,6 +45,8 @@ Description=nvidia-tuner
 [Service]
 Type=exec
 ExecStart=/usr/local/sbin/nvidia-tuner --core-clock-offset 150 --memory-clock-offset 800 --power-limit 180 --pairs 50:30,70:40,90:60,100:100
+Restart=on-failure
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 

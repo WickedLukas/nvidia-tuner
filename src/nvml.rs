@@ -1,4 +1,4 @@
-use nvml_wrapper_sys::bindings::{nvmlDevice_t, NvmlLib};
+use nvml_wrapper_sys::bindings::{nvmlDevice_t, nvmlReturn_t, NvmlLib};
 use std::{panic, process};
 use std::sync::{Once, Arc, Mutex};
 use signal_hook::{consts::signal::*, iterator::Signals};
@@ -11,54 +11,94 @@ pub struct SafeNvmlDevice {
 }
 unsafe impl Send for SafeNvmlDevice {}
 
-// TODO: Shall be deprecated at some point.
-pub fn set_core_clock_offset(
-    nvml_lib: &NvmlLib,
-    device_handle: &Arc<Mutex<SafeNvmlDevice>>,
-    offset: i32
+// Tracks every setting changed by this tool, so the original settings can be restored on exit (panic hook or Term-signal).
+// Once restored is set, the setters no longer change anything. This is important to make sure the original settings are used after the program stopped.
+#[derive(Default)]
+pub struct TunerState {
+    pub restored: bool,
+    pub num_fans: u32,
+    pub fan_speed_changed: bool,
+    pub original_core_clock_offset: Option<i32>,   // MHz
+    pub original_memory_clock_offset: Option<i32>, // MHz
+    pub original_power_limit: Option<u32>          // mW
+}
+
+fn check_result(
+    result: nvmlReturn_t
 ) -> Result<(), String> {
-    let device_handle = device_handle.lock().unwrap();
-    let result = unsafe { nvml_lib.nvmlDeviceSetGpcClkVfOffset(device_handle.handle, offset) };
     if result != 0 {
         Err(format!("Error code: {}", result))
     } else {
         Ok(())
     }
+}
+
+// TODO: Shall be deprecated at some point.
+pub fn set_core_clock_offset(
+    nvml_lib: &NvmlLib,
+    device_handle: &Arc<Mutex<SafeNvmlDevice>>,
+    tuner_state: &Arc<Mutex<TunerState>>,
+    offset: i32
+) -> Result<(), String> {
+    let device_handle = device_handle.lock().unwrap();
+    let mut tuner_state = tuner_state.lock().unwrap();
+    if tuner_state.restored {
+        return Ok(())
+    }
+
+    if tuner_state.original_core_clock_offset.is_none() {
+        let mut original_offset: i32 = 0;
+        check_result(unsafe { nvml_lib.nvmlDeviceGetGpcClkVfOffset(device_handle.handle, &mut original_offset) })
+        .map_err(|e| format!("Failed to get original core clock offset: {}", e))?;
+        tuner_state.original_core_clock_offset = Some(original_offset);
+    }
+
+    check_result(unsafe { nvml_lib.nvmlDeviceSetGpcClkVfOffset(device_handle.handle, offset) })
 }
 
 // TODO: Shall be deprecated at some point.
 pub fn set_memory_clock_offset(
     nvml_lib: &NvmlLib,
     device_handle: &Arc<Mutex<SafeNvmlDevice>>,
+    tuner_state: &Arc<Mutex<TunerState>>,
     offset: i32
 ) -> Result<(), String> {
     let device_handle = device_handle.lock().unwrap();
-    let result = unsafe { nvml_lib.nvmlDeviceSetMemClkVfOffset(device_handle.handle, offset) };
-    if result != 0 {
-        Err(format!("Error code: {}", result))
-    } else {
-        Ok(())
+    let mut tuner_state = tuner_state.lock().unwrap();
+    if tuner_state.restored {
+        return Ok(())
     }
+
+    if tuner_state.original_memory_clock_offset.is_none() {
+        let mut original_offset: i32 = 0;
+        check_result(unsafe { nvml_lib.nvmlDeviceGetMemClkVfOffset(device_handle.handle, &mut original_offset) })
+        .map_err(|e| format!("Failed to get original memory clock offset: {}", e))?;
+        tuner_state.original_memory_clock_offset = Some(original_offset);
+    }
+
+    check_result(unsafe { nvml_lib.nvmlDeviceSetMemClkVfOffset(device_handle.handle, offset) })
 }
 
 pub fn set_power_limit(
     nvml_lib: &NvmlLib,
     device_handle: &Arc<Mutex<SafeNvmlDevice>>,
+    tuner_state: &Arc<Mutex<TunerState>>,
     limit: u32
 ) -> Result<(), String> {
     let device_handle = device_handle.lock().unwrap();
-    let result = unsafe { nvml_lib.nvmlDeviceSetPowerManagementLimit(device_handle.handle, limit * 1000) };
-    if result != 0 {
-        Err(format!("Error code: {}", result))
-    } else {
-        Ok(())
+    let mut tuner_state = tuner_state.lock().unwrap();
+    if tuner_state.restored {
+        return Ok(())
     }
-}
 
-// This is used so nvmlDeviceSetFanSpeed_v2 (main loop) can no more be called after nvmlDeviceSetDefaultFanSpeed_v2 (panic hook or Term-signal),
-// This is important to make sure the default fan speed is used after the program stopped.
-pub struct FanSpeedState {
-    pub default: bool
+    if tuner_state.original_power_limit.is_none() {
+        let mut original_limit: u32 = 0;
+        check_result(unsafe { nvml_lib.nvmlDeviceGetPowerManagementLimit(device_handle.handle, &mut original_limit) })
+        .map_err(|e| format!("Failed to get original power limit: {}", e))?;
+        tuner_state.original_power_limit = Some(original_limit);
+    }
+
+    check_result(unsafe { nvml_lib.nvmlDeviceSetPowerManagementLimit(device_handle.handle, limit * 1000) })
 }
 
 pub fn get_temperature(
@@ -67,12 +107,8 @@ pub fn get_temperature(
 ) -> Result<u32, String> {
     let mut temp = MAX_TEMPERATURE;
     let device_handle = device_handle.lock().unwrap();
-    let result = unsafe { nvml_lib.nvmlDeviceGetTemperature(device_handle.handle, nvml_wrapper_sys::bindings::nvmlTemperatureSensors_enum_NVML_TEMPERATURE_GPU, &mut temp) };
-    if result != 0 {
-        Err(format!("Error code: {}", result))
-    } else {
-        Ok(temp)
-    }
+    check_result(unsafe { nvml_lib.nvmlDeviceGetTemperature(device_handle.handle, nvml_wrapper_sys::bindings::nvmlTemperatureSensors_enum_NVML_TEMPERATURE_GPU, &mut temp) })?;
+    Ok(temp)
 }
 
 fn get_num_fans(
@@ -81,61 +117,93 @@ fn get_num_fans(
 ) -> Result<u32, String> {
     let mut num: u32 = 0;
     let device_handle = device_handle.lock().unwrap();
-    let result = unsafe { nvml_lib.nvmlDeviceGetNumFans(device_handle.handle, &mut num) };
-    if result != 0 {
-        Err(format!("Error code: {}", result))
-    } else {
-        Ok(num)
-    }
+    check_result(unsafe { nvml_lib.nvmlDeviceGetNumFans(device_handle.handle, &mut num) })?;
+    Ok(num)
+}
+
+// Reads the number of fans once, so it does not need to be read on every fan speed update.
+pub fn init_fan_control(
+    nvml_lib: &NvmlLib,
+    device_handle: &Arc<Mutex<SafeNvmlDevice>>,
+    tuner_state: &Arc<Mutex<TunerState>>
+) -> Result<(), String> {
+    let num_fans = get_num_fans(nvml_lib, device_handle).map_err(|e| format!("Failed to get the number of fans: {}", e))?;
+    tuner_state.lock().unwrap().num_fans = num_fans;
+    Ok(())
 }
 
 pub fn set_fan_speed(
     nvml_lib: &NvmlLib,
     device_handle: &Arc<Mutex<SafeNvmlDevice>>,
-    fan_speed_state: &Arc<Mutex<FanSpeedState>>,
+    tuner_state: &Arc<Mutex<TunerState>>,
     speed: u32
 ) -> Result<(), String> {
-    let num_fans = get_num_fans(&nvml_lib, &device_handle).map_err(|e| format!("Failed to get the number of fans: {}", e))?;
-
     let device_handle = device_handle.lock().unwrap();
-    let fan_speed_state = fan_speed_state.lock().unwrap();
-    if fan_speed_state.default {
+    let mut tuner_state = tuner_state.lock().unwrap();
+    if tuner_state.restored {
         return Ok(())
     }
 
-    for fan in 0..num_fans {
-        let result = unsafe { nvml_lib.nvmlDeviceSetFanSpeed_v2(device_handle.handle, fan, speed) };
-        if result != 0 {
-            return Err(format!("Error code: {}", result))
-        }
+    tuner_state.fan_speed_changed = true;
+    for fan in 0..tuner_state.num_fans {
+        check_result(unsafe { nvml_lib.nvmlDeviceSetFanSpeed_v2(device_handle.handle, fan, speed) })?;
     }
     Ok(())
 }
 
-fn set_default_fan_speed(
+fn restore_original_settings(
     nvml_lib: &NvmlLib,
     device_handle: &Arc<Mutex<SafeNvmlDevice>>,
-    fan_speed_state: &Arc<Mutex<FanSpeedState>>
+    tuner_state: &Arc<Mutex<TunerState>>
 ) -> Result<(), String> {
-    let num_fans = get_num_fans(&nvml_lib, device_handle).map_err(|e| format!("Failed to get the number of fans: {}", e))?;
+    // Ignore poisoned locks, restoring the original settings is more important
+    let device_handle = device_handle.lock().unwrap_or_else(|e| e.into_inner());
+    let mut tuner_state = tuner_state.lock().unwrap_or_else(|e| e.into_inner());
+    if tuner_state.restored {
+        return Ok(())
+    }
+    tuner_state.restored = true;
 
-    let device_handle = device_handle.lock().unwrap();
-    let mut fan_speed_state = fan_speed_state.lock().unwrap();
-    fan_speed_state.default = true;
+    // Try to restore every setting, even if restoring a previous one failed
+    let mut errors: Vec<String> = Vec::new();
 
-    for fan in 0..num_fans {
-        let result = unsafe { nvml_lib.nvmlDeviceSetDefaultFanSpeed_v2(device_handle.handle, fan) };
-        if result != 0 {
-            return Err(format!("Error code: {}", result))
+    if tuner_state.fan_speed_changed {
+        for fan in 0..tuner_state.num_fans {
+            if let Err(e) = check_result(unsafe { nvml_lib.nvmlDeviceSetDefaultFanSpeed_v2(device_handle.handle, fan) }) {
+                errors.push(format!("Failed to set default fan speed of fan {}: {}", fan, e));
+            }
         }
     }
-    Ok(())
+
+    if let Some(offset) = tuner_state.original_core_clock_offset {
+        if let Err(e) = check_result(unsafe { nvml_lib.nvmlDeviceSetGpcClkVfOffset(device_handle.handle, offset) }) {
+            errors.push(format!("Failed to restore core clock offset: {}", e));
+        }
+    }
+
+    if let Some(offset) = tuner_state.original_memory_clock_offset {
+        if let Err(e) = check_result(unsafe { nvml_lib.nvmlDeviceSetMemClkVfOffset(device_handle.handle, offset) }) {
+            errors.push(format!("Failed to restore memory clock offset: {}", e));
+        }
+    }
+
+    if let Some(limit) = tuner_state.original_power_limit {
+        if let Err(e) = check_result(unsafe { nvml_lib.nvmlDeviceSetPowerManagementLimit(device_handle.handle, limit) }) {
+            errors.push(format!("Failed to restore power limit: {}", e));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
 }
 
 pub fn setup_cleanup(
     nvml_lib: Arc<NvmlLib>,
     device_handle: Arc<Mutex<SafeNvmlDevice>>,
-    fan_speed_state: Arc<Mutex<FanSpeedState>>
+    tuner_state: Arc<Mutex<TunerState>>
 ) -> Result<(), String> {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
@@ -143,13 +211,13 @@ pub fn setup_cleanup(
         panic::set_hook(Box::new({
             let nvml_lib = Arc::clone(&nvml_lib);
             let device_handle = Arc::clone(&device_handle);
-            let fan_speed_state = Arc::clone(&fan_speed_state);
+            let tuner_state = Arc::clone(&tuner_state);
             move |info| {
                 eprintln!("Panic occurred: {:?}", info);
-                if let Err(e) = set_default_fan_speed(&nvml_lib, &device_handle, &fan_speed_state) {
-                    eprintln!("!!! Setting the default fan speed failed on panic !!!\n\n{}", e);
+                if let Err(e) = restore_original_settings(&nvml_lib, &device_handle, &tuner_state) {
+                    eprintln!("!!! Restoring the original settings failed on panic !!!\n\n{}", e);
                 } else {
-                    println!("Successfully set default fan speed on panic!");
+                    println!("Successfully restored original settings on panic!");
                 }
             }
         }));
@@ -158,12 +226,12 @@ pub fn setup_cleanup(
         let mut term_signals = Signals::new(&[SIGALRM, SIGHUP, SIGINT, SIGIO, SIGPIPE, SIGPROF, SIGTERM, SIGUSR1, SIGUSR2, SIGVTALRM])
         .map_err(|e| format!("Error setting up Term-signal handler: {}", e)).unwrap();
         std::thread::spawn(move || {
-            for signal in term_signals.forever() {
+            if let Some(signal) = term_signals.forever().next() {
                 println!("Term-signal received: {}", signal);
-                if let Err(e) = set_default_fan_speed(&nvml_lib, &device_handle, &fan_speed_state) {
-                    eprintln!("!!! Setting the default fan speed failed on exit !!!\n\n{}", e);
+                if let Err(e) = restore_original_settings(&nvml_lib, &device_handle, &tuner_state) {
+                    eprintln!("!!! Restoring the original settings failed on exit !!!\n\n{}", e);
                 } else {
-                    println!("Successfully set default fan speed on exit!");
+                    println!("Successfully restored original settings on exit!");
                 }
                 process::exit(0);
             }
