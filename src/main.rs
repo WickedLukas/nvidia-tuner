@@ -36,7 +36,7 @@ fn main() {
     let device = nvml.device_by_index(cli.index).map_err(|e| format!("Failed to get GPU: {}", e)).unwrap();
     let device_handle: Arc<Mutex<SafeNvmlDevice>> = Arc::new(Mutex::new(SafeNvmlDevice { handle: unsafe { device.handle() } }));
 
-    // Restore all changed settings on exit. This must be set up before any setting is changed.
+    // Reset all changed settings to default on exit. This must be set up before any setting is changed.
     let tuner_state = Arc::new(Mutex::new(TunerState::default()));
     setup_cleanup(Arc::clone(&nvml_lib), Arc::clone(&device_handle), Arc::clone(&tuner_state))
     .map_err(|e| format!("Failed to setup cleanup: {}", e)).unwrap();
@@ -113,7 +113,7 @@ fn main() {
         };
 
         // Retry on errors, so fan control is not lost due to a single failure.
-        // Give up after too many consecutive errors, which restores the original settings via the panic hook.
+        // Give up after too many consecutive errors, which resets the changed settings via the panic hook.
         let mut consecutive_errors: u32 = 0;
         loop {
             if let Err(e) = update_fan_speed() {
@@ -130,7 +130,7 @@ fn main() {
         }
     }
 
-    // Keep running until a Term-signal is received, so the original settings are restored on exit
+    // Keep running until a Term-signal is received, so the changed settings are reset to default on exit
     loop {
         thread::park();
     }

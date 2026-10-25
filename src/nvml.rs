@@ -15,17 +15,20 @@ pub struct SafeNvmlDevice {
 }
 unsafe impl Send for SafeNvmlDevice {}
 
-// Tracks every setting changed by this tool, so the original settings can be restored on exit (panic hook or Term-signal).
-// Once restored is set, the setters no longer change anything. This is important to make sure the original settings are used after the program stopped.
+// Default clock offset of the driver
+const DEFAULT_CLOCK_OFFSET: i32 = 0; // MHz
+
+// Tracks every setting changed by this tool, so only the changed settings are reset to their defaults on exit (panic hook or Term-signal).
+// Once reset is set, the setters no longer change anything. This is important to make sure the default settings are used after the program stopped.
 #[derive(Default)]
 pub struct TunerState {
-    pub restored: bool,
+    pub reset: bool,
     pub num_fans: u32,
     pub fan_speed_changed: bool,
     pub core_clock_locked: bool,
-    pub original_core_clock_offset: Option<OriginalClockOffset>,   // MHz
-    pub original_memory_clock_offset: Option<OriginalClockOffset>, // MHz
-    pub original_power_limit: Option<u32>                          // mW
+    pub core_clock_offset_api: Option<ClockOffsetApi>,   // set once the core clock offset was changed
+    pub memory_clock_offset_api: Option<ClockOffsetApi>, // set once the memory clock offset was changed
+    pub default_power_limit: Option<u32>                 // mW, set once the power limit was changed
 }
 
 fn check_result(
@@ -38,12 +41,12 @@ fn check_result(
     }
 }
 
-// Original clock offset, depending on which NVML API was used to change it
-pub enum OriginalClockOffset {
-    // Per P-state API (driver >= 555): original offset of every changed P-state
-    PerPState(Vec<(nvmlPstates_t, i32)>),
+// NVML API which was used to change a clock offset, so it can be reset the same way
+pub enum ClockOffsetApi {
+    // Per P-state API (driver >= 555): every changed P-state
+    PerPState(Vec<nvmlPstates_t>),
     // Legacy VF offset API (driver < 555)
-    Legacy(i32)
+    Legacy
 }
 
 fn new_clock_offset(
@@ -85,14 +88,14 @@ fn is_unavailable(
     || result == nvmlReturn_enum_NVML_ERROR_ARGUMENT_VERSION_MISMATCH
 }
 
-// Reads the original offset of every supported P-state.
+// Returns every P-state with an adjustable clock offset and checks that the offset is within its range.
 // Returns None if the per P-state API is not available, e.g. because the driver is older than 555.
-fn get_per_pstate_clock_offsets(
+fn get_adjustable_pstates(
     nvml_lib: &NvmlLib,
     device: nvmlDevice_t,
     clock_type: nvmlClockType_t,
     offset: i32
-) -> Result<Option<Vec<(nvmlPstates_t, i32)>>, String> {
+) -> Result<Option<Vec<nvmlPstates_t>>, String> {
     if nvml_lib.nvmlDeviceGetClockOffsets.is_err() || nvml_lib.nvmlDeviceSetClockOffsets.is_err() {
         return Ok(None)
     }
@@ -101,7 +104,7 @@ fn get_per_pstate_clock_offsets(
         return Ok(None)
     };
 
-    let mut original_offsets = Vec::new();
+    let mut adjustable_pstates = Vec::new();
     for pstate in pstates {
         let mut info = new_clock_offset(clock_type, pstate, 0);
         let result = unsafe { nvml_lib.nvmlDeviceGetClockOffsets(device, &mut info) };
@@ -114,13 +117,13 @@ fn get_per_pstate_clock_offsets(
         if offset < info.minClockOffsetMHz || offset > info.maxClockOffsetMHz {
             return Err(format!("Offset of {} MHz is out of range [{}, {}] MHz", offset, info.minClockOffsetMHz, info.maxClockOffsetMHz))
         }
-        original_offsets.push((pstate, info.clockOffsetMHz));
+        adjustable_pstates.push(pstate);
     }
 
-    if original_offsets.is_empty() {
+    if adjustable_pstates.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(original_offsets))
+        Ok(Some(adjustable_pstates))
     }
 }
 
@@ -137,21 +140,6 @@ fn set_per_pstate_clock_offset(
 }
 
 // TODO: Legacy API. Shall be removed once drivers older than 555 are no longer supported.
-fn get_legacy_clock_offset(
-    nvml_lib: &NvmlLib,
-    device: nvmlDevice_t,
-    clock_type: nvmlClockType_t
-) -> Result<i32, String> {
-    let mut offset: i32 = 0;
-    if clock_type == nvmlClockType_enum_NVML_CLOCK_GRAPHICS {
-        check_result(unsafe { nvml_lib.nvmlDeviceGetGpcClkVfOffset(device, &mut offset) })?;
-    } else {
-        check_result(unsafe { nvml_lib.nvmlDeviceGetMemClkVfOffset(device, &mut offset) })?;
-    }
-    Ok(offset)
-}
-
-// TODO: Legacy API. Shall be removed once drivers older than 555 are no longer supported.
 fn set_legacy_clock_offset(
     nvml_lib: &NvmlLib,
     device: nvmlDevice_t,
@@ -165,21 +153,21 @@ fn set_legacy_clock_offset(
     }
 }
 
-fn restore_clock_offset(
+fn reset_clock_offset(
     nvml_lib: &NvmlLib,
     device: nvmlDevice_t,
     clock_type: nvmlClockType_t,
-    original: &OriginalClockOffset
+    api: &ClockOffsetApi
 ) -> Result<(), String> {
-    match original {
-        OriginalClockOffset::PerPState(original_offsets) => {
-            // Try to restore every P-state, even if restoring a previous one failed
-            let errors: Vec<String> = original_offsets.iter()
-                .filter_map(|&(pstate, offset)| set_per_pstate_clock_offset(nvml_lib, device, clock_type, pstate, offset).err())
+    match api {
+        ClockOffsetApi::PerPState(pstates) => {
+            // Try to reset every P-state, even if resetting a previous one failed
+            let errors: Vec<String> = pstates.iter()
+                .filter_map(|&pstate| set_per_pstate_clock_offset(nvml_lib, device, clock_type, pstate, DEFAULT_CLOCK_OFFSET).err())
                 .collect();
             if errors.is_empty() { Ok(()) } else { Err(errors.join(", ")) }
         }
-        OriginalClockOffset::Legacy(offset) => set_legacy_clock_offset(nvml_lib, device, clock_type, *offset)
+        ClockOffsetApi::Legacy => set_legacy_clock_offset(nvml_lib, device, clock_type, DEFAULT_CLOCK_OFFSET)
     }
 }
 
@@ -194,36 +182,35 @@ fn set_clock_offset(
 ) -> Result<(), String> {
     let device_handle = device_handle.lock().unwrap();
     let mut tuner_state = tuner_state.lock().unwrap();
-    if tuner_state.restored {
+    if tuner_state.reset {
         return Ok(())
     }
     let device = device_handle.handle;
 
-    let original = if clock_type == nvmlClockType_enum_NVML_CLOCK_GRAPHICS {
-        &mut tuner_state.original_core_clock_offset
+    let api = if clock_type == nvmlClockType_enum_NVML_CLOCK_GRAPHICS {
+        &mut tuner_state.core_clock_offset_api
     } else {
-        &mut tuner_state.original_memory_clock_offset
+        &mut tuner_state.memory_clock_offset_api
     };
 
-    if original.is_none() {
-        *original = Some(match get_per_pstate_clock_offsets(nvml_lib, device, clock_type, offset)? {
-            Some(original_offsets) => OriginalClockOffset::PerPState(original_offsets),
+    if api.is_none() {
+        *api = Some(match get_adjustable_pstates(nvml_lib, device, clock_type, offset)? {
+            Some(pstates) => ClockOffsetApi::PerPState(pstates),
             None => {
                 println!("Per P-state clock offsets are not supported, using the legacy clock offset API");
-                OriginalClockOffset::Legacy(get_legacy_clock_offset(nvml_lib, device, clock_type)
-                .map_err(|e| format!("Failed to get original offset: {}", e))?)
+                ClockOffsetApi::Legacy
             }
         });
     }
 
-    match original.as_ref().unwrap() {
-        OriginalClockOffset::PerPState(original_offsets) => {
-            for &(pstate, _) in original_offsets {
+    match api.as_ref().unwrap() {
+        ClockOffsetApi::PerPState(pstates) => {
+            for &pstate in pstates {
                 set_per_pstate_clock_offset(nvml_lib, device, clock_type, pstate, offset)?;
             }
             Ok(())
         }
-        OriginalClockOffset::Legacy(_) => set_legacy_clock_offset(nvml_lib, device, clock_type, offset)
+        ClockOffsetApi::Legacy => set_legacy_clock_offset(nvml_lib, device, clock_type, offset)
     }
 }
 
@@ -261,7 +248,7 @@ pub fn get_min_core_clock(
 }
 
 // Locks the core clock to the range [min_clock, max_clock].
-// NVML can not read an existing lock, so on exit the lock is reset to the driver default instead of an original value.
+// On exit the lock is reset to the driver default.
 pub fn set_locked_core_clocks(
     nvml_lib: &NvmlLib,
     device_handle: &Arc<Mutex<SafeNvmlDevice>>,
@@ -275,7 +262,7 @@ pub fn set_locked_core_clocks(
 
     let device_handle = device_handle.lock().unwrap();
     let mut tuner_state = tuner_state.lock().unwrap();
-    if tuner_state.restored {
+    if tuner_state.reset {
         return Ok(())
     }
 
@@ -291,15 +278,16 @@ pub fn set_power_limit(
 ) -> Result<(), String> {
     let device_handle = device_handle.lock().unwrap();
     let mut tuner_state = tuner_state.lock().unwrap();
-    if tuner_state.restored {
+    if tuner_state.reset {
         return Ok(())
     }
 
-    if tuner_state.original_power_limit.is_none() {
-        let mut original_limit: u32 = 0;
-        check_result(unsafe { nvml_lib.nvmlDeviceGetPowerManagementLimit(device_handle.handle, &mut original_limit) })
-        .map_err(|e| format!("Failed to get original power limit: {}", e))?;
-        tuner_state.original_power_limit = Some(original_limit);
+    // Read the default before changing anything, so a failure shows up now and not only on exit
+    if tuner_state.default_power_limit.is_none() {
+        let mut default_limit: u32 = 0;
+        check_result(unsafe { nvml_lib.nvmlDeviceGetPowerManagementDefaultLimit(device_handle.handle, &mut default_limit) })
+        .map_err(|e| format!("Failed to get default power limit: {}", e))?;
+        tuner_state.default_power_limit = Some(default_limit);
     }
 
     check_result(unsafe { nvml_lib.nvmlDeviceSetPowerManagementLimit(device_handle.handle, limit * 1000) })
@@ -363,7 +351,7 @@ pub fn set_fan_speed(
 ) -> Result<(), String> {
     let device_handle = device_handle.lock().unwrap();
     let mut tuner_state = tuner_state.lock().unwrap();
-    if tuner_state.restored {
+    if tuner_state.reset {
         return Ok(())
     }
 
@@ -374,20 +362,21 @@ pub fn set_fan_speed(
     Ok(())
 }
 
-fn restore_original_settings(
+// Resets every setting changed by this tool to its default. Settings which were not changed are left untouched.
+fn reset_changed_settings(
     nvml_lib: &NvmlLib,
     device_handle: &Arc<Mutex<SafeNvmlDevice>>,
     tuner_state: &Arc<Mutex<TunerState>>
 ) -> Result<(), String> {
-    // Ignore poisoned locks, restoring the original settings is more important
+    // Ignore poisoned locks, resetting the changed settings is more important
     let device_handle = device_handle.lock().unwrap_or_else(|e| e.into_inner());
     let mut tuner_state = tuner_state.lock().unwrap_or_else(|e| e.into_inner());
-    if tuner_state.restored {
+    if tuner_state.reset {
         return Ok(())
     }
-    tuner_state.restored = true;
+    tuner_state.reset = true;
 
-    // Try to restore every setting, even if restoring a previous one failed
+    // Try to reset every setting, even if resetting a previous one failed
     let mut errors: Vec<String> = Vec::new();
 
     if tuner_state.fan_speed_changed {
@@ -404,21 +393,21 @@ fn restore_original_settings(
         }
     }
 
-    if let Some(original) = &tuner_state.original_core_clock_offset {
-        if let Err(e) = restore_clock_offset(nvml_lib, device_handle.handle, nvmlClockType_enum_NVML_CLOCK_GRAPHICS, original) {
-            errors.push(format!("Failed to restore core clock offset: {}", e));
+    if let Some(api) = &tuner_state.core_clock_offset_api {
+        if let Err(e) = reset_clock_offset(nvml_lib, device_handle.handle, nvmlClockType_enum_NVML_CLOCK_GRAPHICS, api) {
+            errors.push(format!("Failed to reset core clock offset: {}", e));
         }
     }
 
-    if let Some(original) = &tuner_state.original_memory_clock_offset {
-        if let Err(e) = restore_clock_offset(nvml_lib, device_handle.handle, nvmlClockType_enum_NVML_CLOCK_MEM, original) {
-            errors.push(format!("Failed to restore memory clock offset: {}", e));
+    if let Some(api) = &tuner_state.memory_clock_offset_api {
+        if let Err(e) = reset_clock_offset(nvml_lib, device_handle.handle, nvmlClockType_enum_NVML_CLOCK_MEM, api) {
+            errors.push(format!("Failed to reset memory clock offset: {}", e));
         }
     }
 
-    if let Some(limit) = tuner_state.original_power_limit {
+    if let Some(limit) = tuner_state.default_power_limit {
         if let Err(e) = check_result(unsafe { nvml_lib.nvmlDeviceSetPowerManagementLimit(device_handle.handle, limit) }) {
-            errors.push(format!("Failed to restore power limit: {}", e));
+            errors.push(format!("Failed to reset power limit: {}", e));
         }
     }
 
@@ -443,10 +432,10 @@ pub fn setup_cleanup(
             let tuner_state = Arc::clone(&tuner_state);
             move |info| {
                 eprintln!("Panic occurred: {}", info);
-                if let Err(e) = restore_original_settings(&nvml_lib, &device_handle, &tuner_state) {
-                    eprintln!("!!! Restoring the original settings failed on panic !!!\n\n{}", e);
+                if let Err(e) = reset_changed_settings(&nvml_lib, &device_handle, &tuner_state) {
+                    eprintln!("!!! Resetting the changed settings to default failed on panic !!!\n\n{}", e);
                 } else {
-                    println!("Successfully restored original settings on panic!");
+                    println!("Successfully reset changed settings to default on panic!");
                 }
             }
         }));
@@ -457,10 +446,10 @@ pub fn setup_cleanup(
         std::thread::spawn(move || {
             if let Some(signal) = term_signals.forever().next() {
                 println!("Term-signal received: {}", signal);
-                if let Err(e) = restore_original_settings(&nvml_lib, &device_handle, &tuner_state) {
-                    eprintln!("!!! Restoring the original settings failed on exit !!!\n\n{}", e);
+                if let Err(e) = reset_changed_settings(&nvml_lib, &device_handle, &tuner_state) {
+                    eprintln!("!!! Resetting the changed settings to default failed on exit !!!\n\n{}", e);
                 } else {
-                    println!("Successfully restored original settings on exit!");
+                    println!("Successfully reset changed settings to default on exit!");
                 }
                 process::exit(0);
             }
