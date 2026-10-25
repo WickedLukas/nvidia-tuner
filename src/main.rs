@@ -11,7 +11,7 @@ mod utils;
 
 use cli::Cli;
 use constants::MAX_CONSECUTIVE_FAN_CONTROL_ERRORS;
-use nvml::{SafeNvmlDevice, TunerState, set_core_clock_offset, set_memory_clock_offset, set_power_limit, init_fan_control, get_min_max_fan_speed, get_temperature, set_fan_speed, setup_cleanup};
+use nvml::{SafeNvmlDevice, TunerState, set_core_clock_offset, set_memory_clock_offset, get_min_core_clock, set_locked_core_clocks, set_power_limit, init_fan_control, get_min_max_fan_speed, get_temperature, set_fan_speed, setup_cleanup};
 use utils::{parse_temperature_fan_speed_pairs, check_temperature_fan_speed_pairs, check_fan_speed_range, interpolate_fan_speed};
 
 fn main() {
@@ -48,6 +48,14 @@ fn main() {
         }
     }
 
+    let min_core_clock: Option<u32> = cli.max_core_clock.map(|max_core_clock| {
+        let min_core_clock = get_min_core_clock(&nvml_lib, &device_handle).map_err(|e| format!("Failed to get the lowest supported core clock: {}", e)).unwrap();
+        if max_core_clock <= min_core_clock {
+            panic!("Maximum core clock of {} MHz must be above the lowest supported core clock of {} MHz", max_core_clock, min_core_clock);
+        }
+        min_core_clock
+    });
+
     // OVERCLOCK
 
     if let Some(core_clock_offset) = cli.core_clock_offset {
@@ -58,6 +66,11 @@ fn main() {
     if let Some(memory_clock_offset) = cli.memory_clock_offset {
         set_memory_clock_offset(&nvml_lib, &device_handle, &tuner_state, memory_clock_offset)
         .map_err(|e| format!("Failed to set memory clock offset: {}", e)).unwrap();
+    }
+
+    if let (Some(min_core_clock), Some(max_core_clock)) = (min_core_clock, cli.max_core_clock) {
+        set_locked_core_clocks(&nvml_lib, &device_handle, &tuner_state, min_core_clock, max_core_clock)
+        .map_err(|e| format!("Failed to lock core clock: {}", e)).unwrap();
     }
 
     if let Some(power_limit) = cli.power_limit {

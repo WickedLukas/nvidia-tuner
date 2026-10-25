@@ -17,6 +17,10 @@ pub struct Cli {
     #[arg(short, long, allow_hyphen_values(true))]
     pub memory_clock_offset: Option<i32>,
 
+    /// Maximum core clock (MHz). Locks the core clock to the range from the lowest supported clock up to this value. Combined with a core clock offset this undervolts the GPU.
+    #[arg(long)]
+    pub max_core_clock: Option<u32>,
+
     /// Power limit (W)
     #[arg(short = 'l', long)]
     pub power_limit: Option<u32>,

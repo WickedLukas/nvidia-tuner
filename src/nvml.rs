@@ -1,6 +1,6 @@
 use nvml_wrapper_sys::bindings::{
     nvmlDevice_t, nvmlReturn_t, nvmlClockOffset_t, nvmlClockType_t, nvmlPstates_t, NvmlLib,
-    nvmlClockType_enum_NVML_CLOCK_GRAPHICS, nvmlClockType_enum_NVML_CLOCK_MEM, nvmlPStates_enum_NVML_PSTATE_UNKNOWN, NVML_MAX_GPU_PERF_PSTATES,
+    nvmlClockType_enum_NVML_CLOCK_GRAPHICS, nvmlClockType_enum_NVML_CLOCK_MEM, nvmlPStates_enum_NVML_PSTATE_0, nvmlPStates_enum_NVML_PSTATE_UNKNOWN, NVML_MAX_GPU_PERF_PSTATES,
     nvmlReturn_enum_NVML_ERROR_NOT_SUPPORTED, nvmlReturn_enum_NVML_ERROR_FUNCTION_NOT_FOUND, nvmlReturn_enum_NVML_ERROR_ARGUMENT_VERSION_MISMATCH
 };
 use std::{panic, process};
@@ -22,6 +22,7 @@ pub struct TunerState {
     pub restored: bool,
     pub num_fans: u32,
     pub fan_speed_changed: bool,
+    pub core_clock_locked: bool,
     pub original_core_clock_offset: Option<OriginalClockOffset>,   // MHz
     pub original_memory_clock_offset: Option<OriginalClockOffset>, // MHz
     pub original_power_limit: Option<u32>                          // mW
@@ -244,6 +245,44 @@ pub fn set_memory_clock_offset(
     set_clock_offset(nvml_lib, device_handle, tuner_state, nvmlClockType_enum_NVML_CLOCK_MEM, offset)
 }
 
+// Returns the lowest core clock of P0, so a locked clock range starting there still allows the GPU to clock down in idle
+pub fn get_min_core_clock(
+    nvml_lib: &NvmlLib,
+    device_handle: &Arc<Mutex<SafeNvmlDevice>>
+) -> Result<u32, String> {
+    if nvml_lib.nvmlDeviceGetMinMaxClockOfPState.is_err() {
+        return Err("Reading the core clock range is not supported by this driver".to_string())
+    }
+
+    let (mut min, mut max): (u32, u32) = (0, 0);
+    let device_handle = device_handle.lock().unwrap();
+    check_result(unsafe { nvml_lib.nvmlDeviceGetMinMaxClockOfPState(device_handle.handle, nvmlClockType_enum_NVML_CLOCK_GRAPHICS, nvmlPStates_enum_NVML_PSTATE_0, &mut min, &mut max) })?;
+    Ok(min)
+}
+
+// Locks the core clock to the range [min_clock, max_clock].
+// NVML can not read an existing lock, so on exit the lock is reset to the driver default instead of an original value.
+pub fn set_locked_core_clocks(
+    nvml_lib: &NvmlLib,
+    device_handle: &Arc<Mutex<SafeNvmlDevice>>,
+    tuner_state: &Arc<Mutex<TunerState>>,
+    min_clock: u32,
+    max_clock: u32
+) -> Result<(), String> {
+    if nvml_lib.nvmlDeviceSetGpuLockedClocks.is_err() || nvml_lib.nvmlDeviceResetGpuLockedClocks.is_err() {
+        return Err("Locking the core clock is not supported by this driver".to_string())
+    }
+
+    let device_handle = device_handle.lock().unwrap();
+    let mut tuner_state = tuner_state.lock().unwrap();
+    if tuner_state.restored {
+        return Ok(())
+    }
+
+    tuner_state.core_clock_locked = true;
+    check_result(unsafe { nvml_lib.nvmlDeviceSetGpuLockedClocks(device_handle.handle, min_clock, max_clock) })
+}
+
 pub fn set_power_limit(
     nvml_lib: &NvmlLib,
     device_handle: &Arc<Mutex<SafeNvmlDevice>>,
@@ -356,6 +395,12 @@ fn restore_original_settings(
             if let Err(e) = check_result(unsafe { nvml_lib.nvmlDeviceSetDefaultFanSpeed_v2(device_handle.handle, fan) }) {
                 errors.push(format!("Failed to set default fan speed of fan {}: {}", fan, e));
             }
+        }
+    }
+
+    if tuner_state.core_clock_locked {
+        if let Err(e) = check_result(unsafe { nvml_lib.nvmlDeviceResetGpuLockedClocks(device_handle.handle) }) {
+            errors.push(format!("Failed to reset locked core clocks: {}", e));
         }
     }
 
