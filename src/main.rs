@@ -7,15 +7,24 @@ use std::sync::{Arc, Mutex};
 mod constants;
 mod cli;
 mod nvml;
+mod show;
 mod utils;
 
 use cli::Cli;
 use constants::MAX_CONSECUTIVE_FAN_CONTROL_ERRORS;
-use nvml::{SafeNvmlDevice, TunerState, set_core_clock_offset, set_memory_clock_offset, get_min_core_clock, set_locked_core_clocks, set_power_limit, init_fan_control, get_min_max_fan_speed, get_temperature, set_fan_speed, setup_cleanup};
+use nvml::{SafeNvmlDevice, TunerState, set_core_clock_offset, set_memory_clock_offset, get_min_core_clock, set_locked_core_clocks, get_power_limit_constraints, set_power_limit, init_fan_control, get_min_max_fan_speed, get_temperature, set_fan_speed, setup_cleanup};
+use show::show;
 use utils::{parse_temperature_fan_speed_pairs, check_temperature_fan_speed_pairs, check_fan_speed_range, interpolate_fan_speed};
 
 fn main() {
     let cli = Cli::parse();
+
+    // Only read and print the current state. This changes nothing, so it needs neither root nor a reset on exit.
+    if cli.show {
+        let nvml = Nvml::init().map_err(|e| format!("Failed to initialize NVML: {}", e)).unwrap();
+        show(&nvml, cli.index).unwrap();
+        return;
+    }
 
     // Validate all input before any setting is changed
     let temp_fan_pairs: Option<Vec<utils::TempFanPair>> = cli.pairs.as_ref().map(|pairs| {
@@ -55,6 +64,15 @@ fn main() {
         }
         min_core_clock
     });
+
+    if let Some(power_limit) = cli.power_limit {
+        let (min_power_limit, max_power_limit) = get_power_limit_constraints(&nvml_lib, &device_handle)
+        .map_err(|e| format!("Failed to get the allowed power limit range: {}", e)).unwrap();
+        if power_limit * 1000 < min_power_limit || power_limit * 1000 > max_power_limit {
+            // Round the range inwards, so every value within the shown range is accepted
+            panic!("Power limit of {} W is out of the allowed range [{}, {}] W", power_limit, min_power_limit.div_ceil(1000), max_power_limit / 1000);
+        }
+    }
 
     // OVERCLOCK
 

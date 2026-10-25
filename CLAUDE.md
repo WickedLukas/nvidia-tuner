@@ -23,9 +23,10 @@ Running the binary for real needs an NVIDIA GPU, driver >= 520, and root. It re-
 
 - `src/main.rs`: escalates privileges, initializes NVML, checks the driver version, applies one-shot settings (clock offsets, power limit), then, if `--pairs` is given, enters an endless fan-control loop with temperature hysteresis. The loop only calls the NVML setter when the interpolated fan speed changes.
 - `src/nvml.rs`: thin wrappers around raw NVML C calls. NVML is used two ways:
-  - `nvml_wrapper::Nvml` (safe API) only for init, driver version, and getting the device handle.
+  - `nvml_wrapper::Nvml` (safe API) only for init, driver version, getting the device handle, and the read-only `--show` output in `src/show.rs`.
   - `nvml_wrapper_sys::NvmlLib` loaded directly from `libnvidia-ml.so.1` for every actual get/set call (`nvmlDeviceSetGpcClkVfOffset`, `nvmlDeviceSetFanSpeed_v2`, etc.). The raw `nvmlDevice_t` is wrapped in `SafeNvmlDevice` (manually `Send`) inside `Arc<Mutex<…>>` so signal-handler threads can share it.
 - `src/utils.rs`: parsing and validation of `temp:fan` pairs (temperatures must strictly increase, fan speeds must not decrease) and linear fan-speed interpolation.
+- `src/show.rs`: `--show`, prints the current state and allowed ranges. It runs before privilege escalation and returns before cleanup is set up, because it changes nothing. clap rejects combining it with tuning options.
 - `src/cli.rs`: clap derive definitions. `src/constants.rs`: limits (max temp 100°C, max fan 100%, max update period 10 s).
 
 ### Cleanup invariant (important)

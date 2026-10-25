@@ -12,6 +12,7 @@ A simple Rust CLI tool for overclocking, undervolting and controlling the fan of
 * Use temperature hysteresis to prevent the fan from spinning up and down too frequently.
 * Automatically reset all changed settings (clock offsets, locked core clock, power limit and fan control) to their defaults on termination.
 * Keep fan control running if single temperature reads or fan speed updates fail.
+* Show the current GPU settings and their allowed ranges.
 
 ## Usage
 
@@ -23,7 +24,13 @@ Show all possible options:
 ./nvidia-tuner --help
 ```
 
-All options can be combined. The tool keeps running until it is terminated (e.g. with Ctrl+C or `systemctl stop`) and then resets all settings it changed to their defaults: clock offsets to 0, the power limit to the default power limit of the GPU, and the locked core clock and fan control back to the driver. Settings which were not changed by the tool are left untouched.
+Show the current GPU settings (clocks, clock offsets, power limit, fan speeds) and their allowed ranges without changing anything. This does not need root:
+
+```bash
+./nvidia-tuner --show
+```
+
+All tuning options can be combined. The tool keeps running until it is terminated (e.g. with Ctrl+C or `systemctl stop`) and then resets all settings it changed to their defaults: clock offsets to 0, the power limit to the default power limit of the GPU, and the locked core clock and fan control back to the driver. Settings which were not changed by the tool are left untouched.
 
 The values below are examples. Stable offsets and clocks differ from GPU to GPU, so start with small values and increase them step by step.
 
@@ -57,7 +64,7 @@ The core clock offset shifts the voltage frequency curve, so each clock needs le
 ./nvidia-tuner --power-limit 165
 ```
 
-Limits the power consumption to the given value in W.
+Limits the power consumption to the given value in W. Values outside the range allowed by the GPU are rejected, `--show` displays this range.
 
 ### Everything combined
 

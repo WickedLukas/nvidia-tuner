@@ -18,7 +18,7 @@ pub struct Cli {
     pub memory_clock_offset: Option<i32>,
 
     /// Maximum core clock (MHz). Locks the core clock to the range from the lowest supported clock up to this value. Combined with a core clock offset this undervolts the GPU.
-    #[arg(long)]
+    #[arg(short = 'x', long)]
     pub max_core_clock: Option<u32>,
 
     /// Power limit (W)
@@ -35,5 +35,9 @@ pub struct Cli {
 
     /// Temperature hysteresis (°C)
     #[arg(short, long, default_value = "5")]
-    pub temperature_hysteresis: u32
+    pub temperature_hysteresis: u32,
+
+    /// Show the current GPU settings and their allowed ranges without changing anything
+    #[arg(short, long, conflicts_with_all = ["core_clock_offset", "memory_clock_offset", "max_core_clock", "power_limit", "pairs", "fan_speed_update_period", "temperature_hysteresis"])]
+    pub show: bool
 }

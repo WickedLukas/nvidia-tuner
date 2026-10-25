@@ -270,6 +270,17 @@ pub fn set_locked_core_clocks(
     check_result(unsafe { nvml_lib.nvmlDeviceSetGpuLockedClocks(device_handle.handle, min_clock, max_clock) })
 }
 
+// Returns the allowed power limit range (mW)
+pub fn get_power_limit_constraints(
+    nvml_lib: &NvmlLib,
+    device_handle: &Arc<Mutex<SafeNvmlDevice>>
+) -> Result<(u32, u32), String> {
+    let (mut min, mut max): (u32, u32) = (0, 0);
+    let device_handle = device_handle.lock().unwrap();
+    check_result(unsafe { nvml_lib.nvmlDeviceGetPowerManagementLimitConstraints(device_handle.handle, &mut min, &mut max) })?;
+    Ok((min, max))
+}
+
 pub fn set_power_limit(
     nvml_lib: &NvmlLib,
     device_handle: &Arc<Mutex<SafeNvmlDevice>>,
