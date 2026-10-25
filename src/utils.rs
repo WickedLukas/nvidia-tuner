@@ -74,6 +74,20 @@ pub fn check_temperature_fan_speed_pairs(
     Ok(())
 }
 
+// Checks that every fan speed can be set on the device, otherwise each fan speed update would fail
+pub fn check_fan_speed_range(
+    pairs: &[TempFanPair],
+    min_fan_speed: u32,
+    max_fan_speed: u32
+) -> Result<(), String> {
+    for pair in pairs {
+        if pair.fan_speed < min_fan_speed || pair.fan_speed > max_fan_speed {
+            return Err(format!("Fan speed of {}% at {}°C is out of the range supported by the GPU [{}, {}]%", pair.fan_speed, pair.temperature, min_fan_speed, max_fan_speed))
+        }
+    }
+    Ok(())
+}
+
 pub fn interpolate_fan_speed(
     temp_fan_pairs: &Vec<TempFanPair>,
     current_temp: u32,

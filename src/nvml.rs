@@ -286,6 +286,25 @@ fn get_num_fans(
     Ok(num)
 }
 
+// Returns the fan speed range which can be set, or None if the device does not report it
+pub fn get_min_max_fan_speed(
+    nvml_lib: &NvmlLib,
+    device_handle: &Arc<Mutex<SafeNvmlDevice>>
+) -> Result<Option<(u32, u32)>, String> {
+    if nvml_lib.nvmlDeviceGetMinMaxFanSpeed.is_err() {
+        return Ok(None)
+    }
+
+    let (mut min, mut max): (u32, u32) = (0, 0);
+    let device_handle = device_handle.lock().unwrap();
+    let result = unsafe { nvml_lib.nvmlDeviceGetMinMaxFanSpeed(device_handle.handle, &mut min, &mut max) };
+    if is_unavailable(result) {
+        return Ok(None)
+    }
+    check_result(result)?;
+    Ok(Some((min, max)))
+}
+
 // Reads the number of fans once, so it does not need to be read on every fan speed update.
 pub fn init_fan_control(
     nvml_lib: &NvmlLib,

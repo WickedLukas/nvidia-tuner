@@ -11,11 +11,18 @@ mod utils;
 
 use cli::Cli;
 use constants::MAX_CONSECUTIVE_FAN_CONTROL_ERRORS;
-use nvml::{SafeNvmlDevice, TunerState, set_core_clock_offset, set_memory_clock_offset, set_power_limit, init_fan_control, get_temperature, set_fan_speed, setup_cleanup};
-use utils::{parse_temperature_fan_speed_pairs, check_temperature_fan_speed_pairs, interpolate_fan_speed};
+use nvml::{SafeNvmlDevice, TunerState, set_core_clock_offset, set_memory_clock_offset, set_power_limit, init_fan_control, get_min_max_fan_speed, get_temperature, set_fan_speed, setup_cleanup};
+use utils::{parse_temperature_fan_speed_pairs, check_temperature_fan_speed_pairs, check_fan_speed_range, interpolate_fan_speed};
 
 fn main() {
     let cli = Cli::parse();
+
+    // Validate all input before any setting is changed
+    let temp_fan_pairs: Option<Vec<utils::TempFanPair>> = cli.pairs.as_ref().map(|pairs| {
+        let temp_fan_pairs = parse_temperature_fan_speed_pairs(pairs).map_err(|e| format!("Failed to parse temperature and fan speed pairs: {}", e)).unwrap();
+        check_temperature_fan_speed_pairs(&temp_fan_pairs).unwrap();
+        temp_fan_pairs
+    });
 
     escalate_privileges().map_err(|e| format!("Failed to escalate privileges: {}", e)).unwrap();
 
@@ -33,6 +40,13 @@ fn main() {
     let tuner_state = Arc::new(Mutex::new(TunerState::default()));
     setup_cleanup(Arc::clone(&nvml_lib), Arc::clone(&device_handle), Arc::clone(&tuner_state))
     .map_err(|e| format!("Failed to setup cleanup: {}", e)).unwrap();
+
+    if let Some(temp_fan_pairs) = &temp_fan_pairs {
+        if let Some((min_fan_speed, max_fan_speed)) = get_min_max_fan_speed(&nvml_lib, &device_handle)
+        .map_err(|e| format!("Failed to get the supported fan speed range: {}", e)).unwrap() {
+            check_fan_speed_range(temp_fan_pairs, min_fan_speed, max_fan_speed).unwrap();
+        }
+    }
 
     // OVERCLOCK
 
@@ -53,10 +67,7 @@ fn main() {
 
     // FAN CONTROL
 
-    if let Some(pairs) = cli.pairs {
-        let temp_fan_pairs: Vec<utils::TempFanPair> = parse_temperature_fan_speed_pairs(&pairs).map_err(|e| format!("Failed to parse temperature and fan speed pairs: {}", e)).unwrap();
-        check_temperature_fan_speed_pairs(&temp_fan_pairs).unwrap();
-
+    if let Some(temp_fan_pairs) = temp_fan_pairs {
         init_fan_control(&nvml_lib, &device_handle, &tuner_state)
         .map_err(|e| format!("Failed to initialize fan control: {}", e)).unwrap();
 
