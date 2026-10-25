@@ -3,7 +3,7 @@ name = "nvidia-tuner"
 version = "0.5.0"
 edition = "2021"
 license = "MIT"
-description = "A simple Rust CLI tool for overlocking, undervolting and controlling the fan of NVIDIA GPUs on Linux. Using the NVML library it equally supports X11 and Wayland."
+description = "A simple Rust CLI tool for overclocking, undervolting and controlling the fan of NVIDIA GPUs on Linux. Using the NVML library it equally supports X11 and Wayland."
 repository = "https://github.com/WickedLukas/nvidia-tuner.git"
 
 [dependencies]

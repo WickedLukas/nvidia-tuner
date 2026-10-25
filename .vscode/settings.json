@@ -3,8 +3,10 @@
         "consts",
         "doas",
         "nvml",
-        "overlocking",
         "pkexec",
-        "undervolting"
+        "pstate",
+        "pstates",
+        "undervolting",
+        "undervolts"
     ]
 }
