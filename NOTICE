@@ -1,0 +1,9 @@
+# NOTICE — fork 归属与致谢
+
+本仓库 `liulisky/nvidia-tuner` 是 [WickedLukas/nvidia-tuner](https://github.com/WickedLukas/nvidia-tuner) 的 fork。
+
+* **上游**：nvidia-tuner，Copyright (c) 2024 WickedLukas，MIT 许可（见 `LICENSE`）。
+  上游全部历史提交与版权声明原样保留；`main` 分支与上游 0.6.0 等价。
+* **本 fork 增量**（`feat/intent-law` 分支，v0.7.2-gfd）：热量意图律风扇模式及配套。
+  编码实现：DeepSeek Harness（dsh）；设计思路与全部控制概念裁定：用户（liulisky）。
+  设计概念一句话：利用率=意图、温度=状态、导数=势能——保温度不急剧变化，优于压低温度。

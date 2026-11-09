@@ -1,10 +1,11 @@
 [package]
 name = "nvidia-tuner"
-version = "0.6.0"
+version = "0.7.2-gfd"
 edition = "2021"
 license = "MIT"
-description = "A simple Rust CLI tool for overclocking, undervolting and controlling the fan of NVIDIA GPUs on Linux. Using the NVML library it equally supports X11 and Wayland."
+description = "Linux 下的 NVIDIA 显卡命令行调校工具：超频、降压、限功耗，并以热量意图律驱动风扇——利用率=意图、温度=状态、导数=势能，逐拍决策保温度不急剧变化；NVML 实现，X11/Wayland 通吃；保留上游曲线模式，--fan-mode 一键切换。"
 repository = "https://github.com/WickedLukas/nvidia-tuner.git"
+homepage = "https://github.com/liulisky/nvidia-tuner"
 
 [dependencies]
 sudo2 = "0.2.1"

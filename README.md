@@ -1,4 +1,68 @@
-# NVIDIA-TUNER
+# NVIDIA-TUNER (gfd)
+
+> 语言索引：**中文（主）** | [English](README.en.md)
+
+# NVIDIA-TUNER (gfd)
+
+**Linux 下的 NVIDIA 显卡命令行调校工具**：超频、降压、限功耗，风扇控制支持两种模式——上游线性风扇曲线，与本 fork 新增的**热量意图律**。基于 NVML，X11 / Wayland 通吃。通常以 systemd 常驻服务运行（见下"部署"）。
+
+## 热量意图律（本 fork 核心，`--fan-mode intent`）
+
+三条输入、一张八格决策表、逐拍重判：
+
+| 输入 | 角色 | 公理 |
+|---|---|---|
+| 利用率 u | **意图** | 满载温度必升，空载温度必降 |
+| 温度 T | 状态 | 70°C 以内无需强力散热 |
+| 温度导数 dT | 势能 | 预警区+升温=提前加风（起势） |
+
+目标函数 = **保持温度不急剧变化**（热冲击对焊点的伤害大于适度高温）。因此：升载用斜率限连续加风压峰值；撤载**撤销干预直落地板档**——"降温慢"不靠程序演，交还给物理（温差衰减的自然对流自动把降温曲线拉缓）。地板档永不关死：热量必散尽，只存在"多快散完"。
+
+```bash
+nvidia-tuner --fan-mode intent --pairs 40:30,85:90          # --pairs 仍必填（范围预检/回退位）
+# 业务调参（全有缺省）：--intent-free-lo/--intent-warn/--intent-free-hi
+#                      --intent-floor/--intent-load-line/--intent-slope-up/--intent-slope-down
+nvidia-tuner --fan-mode curve --pairs 40:30,60:45,70:65,85:90   # 上游行为，一键回退
+```
+
+每拍决策日志 `t=68 u=100 duty=34 state=Rise`——动作全可回放质询；连续失败自动交还驱动 AUTO（上游 fail-safe 面完整继承，坏配置在启动校验即拒）。
+
+## 功能一览
+
+* 设置核心/显存频率偏移（超频/降压）。
+* 锁定最高核心频率（配合偏移实现降压）。
+* 设置功耗墙。
+* 风扇控制：线性曲线（温度区间自动插值 + 可选温度滞回）**或热量意图律**（见上）。
+* `--show`：只读打印当前设置与允许范围。
+* 权限自举（sudo/doas/pkexec）；全部改动在退出时**重置为默认**而非启动前值（上游纪律，本 fork 全部新功能遵守）。
+
+## 部署（systemd）
+
+```ini
+[Unit]
+Description=nvidia-tuner
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/nvidia-tuner --fan-mode intent --pairs 40:30,60:45,70:65,85:90
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## 构建
+
+```bash
+cargo build --release
+```
+
+要求：Linux、NVIDIA 驱动 ≥ 520。`--show` 外的一切调校参数都会改真实硬件设置。
+
+---
+
+# Original (upstream README, preserved)
 
 A simple Rust CLI tool for overclocking, undervolting and controlling the fan of NVIDIA GPUs on Linux. Using the NVML library it equally supports X11 and Wayland.
 
@@ -10,110 +74,16 @@ A simple Rust CLI tool for overclocking, undervolting and controlling the fan of
 * Set power limit.
 * Fan control using a custom linear fan curve.
 * Use temperature hysteresis to prevent the fan from spinning up and down too frequently.
-* Automatically reset all changed settings (clock offsets, locked core clock, power limit and fan control) to their defaults on termination.
-* Keep fan control running if single temperature reads or fan speed updates fail.
-* Show the current GPU settings and their allowed ranges.
+* Use `--show` to get the current settings and allowed ranges without changing anything.
+
+The fan curve is defined by temperature and fan speed pairs, in the format `temp1:fan1,temp2:fan2,...`. Between these points the fan speed is linearly interpolated. Temperatures must be strictly increasing, fan speeds must be non-decreasing, all values must be within the limits supported by your GPU.
 
 ## Usage
 
-**This tool is still under testing and it is impossible for me to guarantee that it works on every hardware, so use it at your own risk**
+Run `nvidia-tuner --help` or see the options table above. The tool re-execs itself through sudo, doas or pkexec if not run as root, and resets all settings it changed to their defaults on exit.
 
-Show all possible options:
+---
 
-```bash
-./nvidia-tuner --help
-```
+## 实现署名
 
-Show the current GPU settings (clocks, clock offsets, power limit, fan speeds) and their allowed ranges without changing anything. This does not need root:
-
-```bash
-./nvidia-tuner --show
-```
-
-All tuning options can be combined. The tool keeps running until it is terminated (e.g. with Ctrl+C or `systemctl stop`) and then resets all settings it changed to their defaults: clock offsets to 0, the power limit to the default power limit of the GPU, and the locked core clock and fan control back to the driver. Settings which were not changed by the tool are left untouched.
-
-The values below are examples. Stable offsets and clocks differ from GPU to GPU, so start with small values and increase them step by step.
-
-### Custom fan curve
-
-```bash
-./nvidia-tuner --pairs 50:30,70:40,90:60,100:100
-```
-
-The pairs are `temperature:fan speed` in °C and %. In this example the fan speed is 30% up to 50°C and 100% at 100°C. Between the pairs the fan speed is linearly interpolated for smooth transitions. Fan speeds outside the range supported by the GPU (e.g. below 30% on many cards) are rejected.
-
-### Overclocking
-
-```bash
-./nvidia-tuner --core-clock-offset 150 --memory-clock-offset 800
-```
-
-Raises the core and memory clocks by the given offsets in MHz.
-
-### Undervolting
-
-```bash
-./nvidia-tuner --core-clock-offset 170 --max-core-clock 2600
-```
-
-The core clock offset shifts the voltage frequency curve, so each clock needs less voltage. Locking the maximum core clock keeps the GPU at or below that clock, which then runs at a lower voltage. The lowest supported clock is used as the minimum, so the GPU still clocks down in idle.
-
-### Lower power consumption
-
-```bash
-./nvidia-tuner --power-limit 165
-```
-
-Limits the power consumption to the given value in W. Values outside the range allowed by the GPU are rejected, `--show` displays this range.
-
-### Everything combined
-
-```bash
-./nvidia-tuner --core-clock-offset 170 --max-core-clock 2600 --memory-clock-offset 800 --power-limit 165 --pairs 50:30,70:40,90:60,100:100
-```
-
-## Run on startup
-
-1. Download the binary file from [the latest release](https://github.com/WickedLukas/nvidia-tuner/releases).
-2. Copy it to `/usr/local/sbin/`.
-3. Create the systemd service file `/etc/systemd/system/nvidia-tuner.service` with the following content:
-
-```service
-[Unit]
-Description=nvidia-tuner
-
-[Service]
-Type=exec
-ExecStart=/usr/local/sbin/nvidia-tuner --core-clock-offset 170 --max-core-clock 2600 --memory-clock-offset 800 --power-limit 165 --pairs 50:30,70:40,90:60,100:100
-Restart=on-failure
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=graphical.target
-```
-
-4. Reload the systemd manager configuration to recognize the new service:
-
-```bash
-sudo systemctl daemon-reload
-```
-
-5. Start the service:
-
-```bash
-sudo systemctl start nvidia-tuner.service
-```
-
-6. Enable the service to start automatically at boot:
-
-```bash
-sudo systemctl enable nvidia-tuner.service
-```
-
-7. Check the systemd journal for any errors:
-
-```bash
-sudo journalctl -u nvidia-tuner.service
-```
+本 fork 的编码实现由 **DeepSeek Harness（dsh）** 完成，**用户提供全部设计思路与控制概念**（热量意图律六公理与八格表的判词均出自人工裁定）；上游 nvidia-tuner 由 Lukas（WickedLukas）开发，MIT 许可，版权与致谢见 `LICENSE` 与 `NOTICE`。

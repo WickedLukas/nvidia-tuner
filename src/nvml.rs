@@ -31,7 +31,9 @@ pub struct TunerState {
     pub default_power_limit: Option<u32>                 // mW, set once the power limit was changed
 }
 
-fn check_result(
+// [fork 变更·可见性] 原私有→pub(crate)：新增 util.rs 的 NVML 返回码检查需跨模块复用同一约定
+// （行为零改动；见 src/util.rs::get_utilization 用法与 get_temperature 完全同构）。
+pub(crate) fn check_result(
     result: nvmlReturn_t
 ) -> Result<(), String> {
     if result != 0 {
