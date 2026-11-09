@@ -10,30 +10,21 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            bin: nvidia-tuner-linux-x86_64
-            note: dynamic, glibc>=2.39
-          - target: x86_64-unknown-linux-musl
-            bin: nvidia-tuner-linux-x86_64-static
-            note: fully static
     steps:
       - uses: actions/checkout@v4
-      - run: rustup target add ${{ matrix.target }}
+      - run: rustup target add x86_64-unknown-linux-musl
       - run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - run: cargo test --target x86_64-unknown-linux-gnu   # 门禁：决策表单测全绿才发布
-      - run: cargo build --release --target ${{ matrix.target }}
+      - run: cargo test                      # 门禁：决策表单测全绿才发布
+      - run: cargo build --release --target x86_64-unknown-linux-musl
       - run: |
-          cp target/${{ matrix.target }}/release/nvidia-tuner ${{ matrix.bin }}
-          sha256sum ${{ matrix.bin }} > ${{ matrix.bin }}.sha256
+          cp target/x86_64-unknown-linux-musl/release/nvidia-tuner nvidia-tuner-linux-x86_64-static
+          sha256sum nvidia-tuner-linux-x86_64-static > nvidia-tuner-linux-x86_64-static.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.bin }}
+          name: dist
           path: |
-            ${{ matrix.bin }}
-            ${{ matrix.bin }}.sha256
+            nvidia-tuner-linux-x86_64-static
+            nvidia-tuner-linux-x86_64-static.sha256
 
   release:
     needs: build
@@ -41,13 +32,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with: { path: artifacts }
-      - run: |
-          mkdir -p rel
-          for d in artifacts/*/; do b=$(basename "$d"); mv "$d/nvidia-tuner" "rel/$b"; mv "$d/nvidia-tuner.sha256" "rel/$b.sha256"; done
-          ls -la rel/
+        with: { path: dist }
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
           body_path: CHANGELOG.md
-          files: rel/*
+          files: dist/*

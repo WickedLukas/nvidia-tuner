@@ -4,7 +4,7 @@
 
 Fork of [nvidia-tuner](https://github.com/WickedLukas/nvidia-tuner) (MIT) adding the **heat-intent fan law**. Design concept in one line: **utilization = intent, temperature = state, temperature derivative = momentum** — the fan is actuated to keep temperature from changing abruptly (thermal-shock protection of solder joints outranks "as cool as possible"). Retains the upstream linear fan-curve mode verbatim; `--fan-mode curve|intent` switches between them.
 
-Releases ship two single-file binaries: dynamic (glibc >= 2.39) and fully static (any x86_64 Linux), with sha256 sums.
+Releases ship one fully static binary (`nvidia-tuner-linux-x86_64-static`, runs on any x86_64 Linux), with sha256 sum.
 
 ## Quick start
 
