@@ -52,6 +52,10 @@ Restart=always
 WantedBy=multi-user.target
 ```
 
+## 下载与构建
+
+**免环境直取**：Releases 页有两个单文件二进制——`nvidia-tuner`（动态链接，glibc >= 2.39，Ubuntu 24.04+/Debian 13+）与 `-static` 全静态版（任意 x86_64 Linux 通吃），附 sha256；`chmod +x` 即用。
+
 ## 构建
 
 ```bash

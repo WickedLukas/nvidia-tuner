@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            artifact: nvidia-tuner-gfd-linux-x86_64
+            note: dynamic (glibc >= 2.39, Ubuntu 24.04+/Debian 13+)
+          - target: x86_64-unknown-linux-musl
+            artifact: nvidia-tuner-gfd-linux-x86_64-static
+            note: fully static (any x86_64 Linux)
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add ${{ matrix.target }}
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools   # musl 链接器（ubuntu 官方源自带，免 cross）
+      - run: cargo test --target x86_64-unknown-linux-gnu   # 门禁：决策表单测全绿才发布
+      - run: cargo build --release --target ${{ matrix.target }}
+      - run: |
+          bin=target/${{ matrix.target }}/release/nvidia-tuner
+          sha256sum "$bin" > "$bin.sha256"
+          echo "artifact=${{ matrix.artifact }}" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            target/${{ matrix.target }}/release/nvidia-tuner
+            target/${{ matrix.target }}/release/nvidia-tuner.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: CHANGELOG.md
+          files: |
+            artifacts/nvidia-tuner-gfd-linux-x86_64/nvidia-tuner
+            artifacts/nvidia-tuner-gfd-linux-x86_64/nvidia-tuner.sha256
+            artifacts/nvidia-tuner-gfd-linux-x86_64-static/nvidia-tuner
+            artifacts/nvidia-tuner-gfd-linux-x86_64-static/nvidia-tuner.sha256
